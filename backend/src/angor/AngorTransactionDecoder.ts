@@ -4,14 +4,22 @@ import * as tinySecp256k1 from 'tiny-secp256k1';
 import BIP32Factory from 'bip32';
 import crypto from 'crypto';
 import { bech32 } from 'bech32';
+import AngorProjectRepository from '../repositories/AngorProjectRepository';
+import AngorInvestmentRepository from '../repositories/AngorInvestmentRepository';
 
 /**
  * Represents a Bitcoin network.
  * Supports Bitcoin and Bitcoin Testnet.
  */
-export enum Networks {
+export enum AngorSupportedNetworks {
   Testnet = 'testnet',
   Bitcoin = 'bitcoin',
+}
+
+export enum AngorTransactionStatus {
+  NotIdentified = 'notIdentified',
+  Pending = 'pending',
+  Confirmed = 'confirmed',
 }
 
 /**
@@ -19,53 +27,102 @@ export enum Networks {
  */
 export class AngorTransactionDecoder {
   private transaction: bitcoinJS.Transaction;
-  private founderKeyHex: string;
-  private founderKeyHash: string;
   private network: bitcoinJS.Network;
   private angorKeys = {
-    [Networks.Testnet]:
+    [AngorSupportedNetworks.Testnet]:
       'tpubD8JfN1evVWPoJmLgVg6Usq2HEW9tLqm6CyECAADnH5tyQosrL6NuhpL9X1cQCbSmndVrgLSGGdbRqLfUbE6cRqUbrHtDJgSyQEY2Uu7WwTL',
-    [Networks.Bitcoin]:
+    [AngorSupportedNetworks.Bitcoin]:
       'xpub661MyMwAqRbcGNxKe9aFkPisf3h32gHLJm8f9XAqx8FB1Nk6KngCY8hkhGqxFr2Gyb6yfUaQVbodxLoC1f3K5HU9LM1CXE59gkEXSGCCZ1B',
   };
   private angorKey: string;
-
-  /**
-   * Angor project identifier.
-   */
-  public projectId: string;
-  /**
-   * Angor project Nostr public key.
-   */
-  public nostrPubKey: string;
 
   /**
    * Constructs Angor transaction for the project creation.
    * @param transactionHex - hex of the raw transaction.
    * @param network - bitcoin network.
    */
-  constructor(transactionHex: string, network: Networks) {
+  constructor(transactionHex: string, network: AngorSupportedNetworks) {
     this.transaction = bitcoinJS.Transaction.fromHex(transactionHex);
-
-    this.validateTransaction();
 
     this.network = bitcoinJS.networks[network];
     this.angorKey = this.angorKeys[network];
+  }
 
-    this.decompileOpReturnScript();
-    this.founderKeyHex = this.getFounderKeyHex();
-    this.founderKeyHash = this.getKeyHash();
-    this.hashToInt();
-    this.getProjectIdDerivation();
-    this.projectId = this.getProjectId();
-    this.nostrPubKey = this.getNostrPubKey();
+  /**
+   * Decode and store transaction as Angor project creation transaction.
+   * If transaction is not an Angor project creation transaction, an error will be thrown.
+   * @param transactionStatus - status of the transaction.
+   */
+  public async decodeAndStoreProjectCreationTransaction(
+    transactionStatus: AngorTransactionStatus
+  ): Promise<void> {
+    this.validateProjectCreationTransaction();
+
+    const chunks = this.decompileOpReturnScript();
+    const founderKeyHex = this.getFounderKeyHex(chunks);
+    const founderKeyHash = this.getKeyHash(founderKeyHex);
+    const founderKeyHashInt = this.hashToInt(founderKeyHash);
+    const projectIdDerivation = this.getProjectIdDerivation(founderKeyHashInt);
+    const projectId = this.getProjectId(projectIdDerivation);
+    const nostrPubKey = this.getNostrPubKey();
+    const addressOnFeeOutput = this.getAddressOnFeeOutput();
+
+    // Store Angor project in the DB.
+    await this.storeProjectInfo(
+      projectId,
+      nostrPubKey,
+      addressOnFeeOutput,
+      transactionStatus
+    );
+
+    // If transaction is confirmed (in the block), update statuses
+    // of the investment transactions related to this project.
+    if (transactionStatus === AngorTransactionStatus.Confirmed) {
+      await this.updateInvestmentsStatus(
+        addressOnFeeOutput,
+        AngorTransactionStatus.Confirmed
+      );
+    }
+  }
+
+  /**
+   * Decode and store transaction as Angor investment transaction.
+   * If transaction is not an Angor investment transaction, an error will be thrown.
+   * @param transactionStatus - status of the transaction.
+   */
+  public async decodeAndStoreInvestmentTransaction(
+    transactionStatus: AngorTransactionStatus
+  ): Promise<void> {
+    this.validateInvestmentTransaction();
+
+    const addressOnFeeOutput = this.getAddressOnFeeOutput();
+
+    // Get Angor project with the same address on fee output.
+    const project = await this.getProject(addressOnFeeOutput);
+
+    // Return of there is no Angor project with the same address on fee output.
+    if (!project) {
+      return;
+    }
+
+    const txid = this.transaction.getId();
+    const amount = this.transaction.outs[0].value;
+
+    // Store Angor investment in the DB.
+    await this.storeInvestmentInfo(
+      txid,
+      amount,
+      addressOnFeeOutput,
+      transactionStatus
+    );
   }
 
   /**
    * Validates transaction object.
-   * @param transaction - an object representing bitcoin transaction.
    */
-  private validateTransaction(transaction = this.transaction): void {
+  private validateProjectCreationTransaction(): void {
+    const { transaction } = this;
+
     // Throw an error if transaction object is not present.
     if (!transaction) {
       throw new Error(`Transaction object wasn't created.`);
@@ -91,11 +148,49 @@ export class AngorTransactionDecoder {
   }
 
   /**
+   * Validates transaction object.
+   */
+  private validateInvestmentTransaction(): void {
+    const { transaction } = this;
+
+    // Throw an error if transaction object is not present.
+    if (!transaction) {
+      throw new Error(`Transaction object wasn't created.`);
+    }
+
+    // Throw an error if transaction outputs are not present.
+    if (!transaction.outs) {
+      throw new Error(`Transaction object doesn't have outputs.`);
+    }
+    // Throw an error if the amount of transaction outputs is not equal to 3.
+    else if (transaction.outs.length < 1) {
+      throw new Error(`Transaction object has invalid amount of outputs.`);
+    }
+  }
+
+  /**
+   * Fetches Angor project by address on fee output from the DB.
+   * @param address - address on fee output.
+   * @returns - promise that resolves into an array of Angor projects.
+   */
+  private async getProject(address): Promise<any> {
+    const project = await AngorProjectRepository.$getProject(address);
+
+    if (project.length) {
+      return project[0];
+    }
+
+    return undefined;
+  }
+
+  /**
    * Decompiles (splits into chunks) OP_RETURN script.
    * @param transaction - an object representing bitcoin transaction.
    * @returns - an array of strings representing script chunks.
    */
-  private decompileOpReturnScript(transaction = this.transaction): string[] {
+  private decompileOpReturnScript(): string[] {
+    const { transaction } = this;
+
     const script: Buffer = transaction.outs[1].script;
 
     // Decompiled is an array of Buffers.
@@ -140,8 +235,7 @@ export class AngorTransactionDecoder {
    * Sets the founder key of the Angor project in Hex encoding.
    * @returns - string representing founder key in Hex encoding
    */
-  private getFounderKeyHex(): string {
-    const chunks = this.decompileOpReturnScript();
+  private getFounderKeyHex(chunks: string[]): string {
     const founderKeyBuffer = Buffer.from(chunks[0], 'hex');
     const founderECpair = ECPairFactory(tinySecp256k1).fromPublicKey(
       founderKeyBuffer,
@@ -159,11 +253,7 @@ export class AngorTransactionDecoder {
    * @param key - founder key in Hex encoding.
    * @returns - string representing founder key hash.
    */
-  private getKeyHash(key = this.founderKeyHex): string {
-    if (!key) {
-      throw new Error(`Key is not provided nor present.`);
-    }
-
+  private getKeyHash(key: string): string {
     // SHA-256 hash of the founder key.
     const firstHash = bitcoinJS.crypto.sha256(Buffer.from(key, 'hex'));
     // SHA-256 hash of the founder key hash.
@@ -181,11 +271,7 @@ export class AngorTransactionDecoder {
    * @param hash - founder key hash in Hex encoding.
    * @returns - founder key hash casted to an integer.
    */
-  private hashToInt(hash = this.founderKeyHash): number {
-    if (!hash) {
-      throw new Error(`Hash is not provided nor present.`);
-    }
-
+  private hashToInt(hash: string): number {
     const hashBuffer = Buffer.from(hash, 'hex');
     // Read an unsigned, big-endian 32-bit integer from the hash of the founder key
     // using 28 as an offset. The offset is used to match the result of
@@ -199,8 +285,7 @@ export class AngorTransactionDecoder {
    * Provides project id derivation.
    * @returns an integer that is derived from integer representation of founder key hash.
    */
-  private getProjectIdDerivation(): number {
-    const founderKeyHashInt = this.hashToInt();
+  private getProjectIdDerivation(founderKeyHashInt: number): number {
     // The max size of bip32 derivation range is 2,147,483,648 (2^31) the max number of uint is 4,294,967,295 so we must to divide by 2 and round it to the floor.
     const retention = Math.floor(founderKeyHashInt / 2);
 
@@ -217,9 +302,7 @@ export class AngorTransactionDecoder {
    * Sets Angor project id.
    * @returns - string representing Angor project id.
    */
-  private getProjectId(): string {
-    const projectIdDerivation = this.getProjectIdDerivation();
-
+  private getProjectId(projectIdDerivation: number): string {
     // BIP32 (Bitcoin Improvement Proposal 32) extended public key created
     // based on the angor key and the network.
     const extendedPublicKey = BIP32Factory(tinySecp256k1).fromBase58(
@@ -262,5 +345,73 @@ export class AngorTransactionDecoder {
     const chunks = this.decompileOpReturnScript();
 
     return chunks[1];
+  }
+
+  /**
+   * Provides address on fee output of project creation transaction.
+   * @returns - string that represents address on fee output.
+   */
+  private getAddressOnFeeOutput(): string {
+    const script: Buffer = this.transaction.outs[0].script;
+    const address = bitcoinJS.address.fromOutputScript(script, this.network);
+
+    return address;
+  }
+
+  /**
+   * Stores Angor project into the DB.
+   * @param projectId - project ID.
+   * @param nostrPubKey - Nostr public key of the project.
+   * @param addressOnFeeOutput - address on fee output.
+   * @param transactionStatus - status of the transaction.
+   */
+  private async storeProjectInfo(
+    projectId: string,
+    nostrPubKey: string,
+    addressOnFeeOutput: string,
+    transactionStatus: AngorTransactionStatus
+  ): Promise<void> {
+    await AngorProjectRepository.$setProject(
+      projectId,
+      nostrPubKey,
+      addressOnFeeOutput,
+      transactionStatus
+    );
+  }
+
+  /**
+   *  Stores Angor investment into the DB.
+   * @param txid - transaction ID.
+   * @param amount - transaction amount in sats.
+   * @param addressOnFeeOutput - address on fee output.
+   * @param transactionStatus - status of the transaction.
+   */
+  private async storeInvestmentInfo(
+    txid: string,
+    amount: number,
+    addressOnFeeOutput: string,
+    transactionStatus: AngorTransactionStatus
+  ): Promise<void> {
+    await AngorInvestmentRepository.$setInvestment(
+      txid,
+      amount,
+      addressOnFeeOutput,
+      transactionStatus
+    );
+  }
+
+  /**
+   * Updates statuses of the transactions filtered by address on fee output.
+   * @param addressOnFeeOutput - address on fee output.
+   * @param transactionStatus - transaction status.
+   */
+  private async updateInvestmentsStatus(
+    addressOnFeeOutput: string,
+    transactionStatus: AngorTransactionStatus
+  ): Promise<void> {
+    await AngorInvestmentRepository.$updateInvestmentsStatus(
+      addressOnFeeOutput,
+      transactionStatus
+    );
   }
 }

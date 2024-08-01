@@ -106,8 +106,14 @@ class DatabaseMigration {
 
     const isBitcoin = ['mainnet', 'testnet', 'signet'].includes(config.MEMPOOL.NETWORK);
 
-    await this.$executeQuery(this.getCreateElementsTableQuery(), await this.$checkIfTableExists('elements_pegs'));
-    await this.$executeQuery(this.getCreateStatisticsQuery(), await this.$checkIfTableExists('statistics'));
+    await this.$executeQuery(
+      this.getCreateAngorProjectsTableQuery(),
+      await this.$checkIfTableExists('angor_projects')
+    );
+    await this.$executeQuery(
+      this.getCreateAngorInvestmentsTableQuery(),
+      await this.$checkIfTableExists('angor_investments')
+    );
     if (databaseSchemaVersion < 2 && this.statisticsAddedIndexed === false) {
       await this.$executeQuery(`CREATE INDEX added ON statistics (added);`);
       await this.updateToSchemaVersion(2);
@@ -1248,6 +1254,26 @@ class DatabaseMigration {
       INDEX (added),
       INDEX (height),
       INDEX (pool)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8;`;
+  }
+
+  private getCreateAngorProjectsTableQuery(): string {
+    return `CREATE TABLE IF NOT EXISTS angor_projects (
+      id CHAR(45) NOT NULL,
+      npub CHAR(64) NOT NULL,
+      address_on_fee_output CHAR(51) NOT NULL,
+      creation_transaction_status VARCHAR(10) NOT NULL,
+      PRIMARY KEY (id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8;`;
+  }
+
+  private getCreateAngorInvestmentsTableQuery(): string {
+    return `CREATE TABLE IF NOT EXISTS angor_investments (
+      txid CHAR(64) NOT NULL,
+      amount_sats BIGINT NOT NULL,
+      address_on_fee_output CHAR(51) NOT NULL,
+      transaction_status VARCHAR(13) NOT NULL,
+      PRIMARY KEY (txid)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8;`;
   }
 

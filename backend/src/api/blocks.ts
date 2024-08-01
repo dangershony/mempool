@@ -932,7 +932,35 @@ class Blocks {
         }
 
         await blocksRepository.$saveBlockInDatabase(blockExtended);
-        this.updateTimerProgress(timer, `saved ${this.currentBlockHeight} to database`);
+        // New block is saved to the DB.
+        // Decode block transaction with Angor decoder to identify transactions
+        // related to Angor projects.
+        const transactionIds = await bitcoinApi.$getTxIdsForBlock(blockHash);
+
+        for (const transactionId of transactionIds) {
+          const transactionHex = await bitcoinApi.$getTransactionHex(
+            transactionId
+          );
+
+          const angorDecoder = new AngorTransactionDecoder(
+            transactionHex,
+            AngorSupportedNetworks.Testnet
+          );
+
+          await angorDecoder
+            .decodeAndStoreProjectCreationTransaction(
+              AngorTransactionStatus.Confirmed
+            )
+            .catch(async () => {
+              await angorDecoder
+                .decodeAndStoreInvestmentTransaction(
+                  AngorTransactionStatus.Confirmed
+                )
+                .catch(() => {
+                  // Ignore error.
+                });
+            });
+        }
 
         if (!fastForwarded) {
           let lastestPriceId;

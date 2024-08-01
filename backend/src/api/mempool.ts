@@ -12,6 +12,11 @@ import rbfCache from './rbf-cache';
 import { Acceleration } from './services/acceleration';
 import redisCache from './redis-cache';
 import blocks from './blocks';
+import {
+  AngorTransactionDecoder,
+  AngorSupportedNetworks,
+  AngorTransactionStatus,
+} from '../angor/AngorTransactionDecoder';
 
 class Mempool {
   private inSync: boolean = false;
@@ -369,6 +374,31 @@ class Mempool {
       this.updateTimerProgress(timer, 'running async mempool callback');
       await this.$asyncMempoolChangedCallback(this.mempoolCache, newMempoolSize, newTransactions, deletedTransactions, accelerationDelta, candidates);
       this.updateTimerProgress(timer, 'completed async mempool callback');
+    }
+
+    // Use Angor decoder to identify transaction related to Angor projects that
+    // were added to the mempool.
+    for (const transaction of newTransactions) {
+      const { txid } = transaction;
+
+      const transactionHex = await bitcoinApi.$getTransactionHex(txid);
+
+      const angorDecoder = new AngorTransactionDecoder(
+        transactionHex,
+        AngorSupportedNetworks.Testnet
+      );
+
+      await angorDecoder
+        .decodeAndStoreProjectCreationTransaction(
+          AngorTransactionStatus.Pending
+        )
+        .catch(async () => {
+          await angorDecoder
+            .decodeAndStoreInvestmentTransaction(AngorTransactionStatus.Pending)
+            .catch(() => {
+              // Ignore error.
+            });
+        });
     }
 
     if (!this.inSync && transactions.length === newMempoolSize) {

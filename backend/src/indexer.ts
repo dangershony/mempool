@@ -25,6 +25,7 @@ class Indexer {
   private tasksRunning: { [key in TaskName]?: boolean; } = {};
   private tasksScheduled: { [key in TaskName]?: NodeJS.Timeout; } = {};
   private coreIndexes: CoreIndex[] = [];
+  private initialIndexingCompleted = false;
 
   public indexerIsRunning(): boolean {
     return this.indexerRunning;
@@ -193,6 +194,15 @@ class Indexer {
       await statisticsReplicator.$sync();
       await AccelerationRepository.$indexPastAccelerations();
       // do not wait for classify blocks to finish
+
+      // Index transactions related to Angor projects.
+      // This operation should be done once when initial indexing is complete.
+      if (!this.initialIndexingCompleted) {
+        this.initialIndexingCompleted = true;
+
+        await this.indexAngorTransactions();
+      }
+
       blocks.$classifyBlocks();
     } catch (e) {
       this.indexerRunning = false;
@@ -207,6 +217,61 @@ class Indexer {
     const runEvery = 1000 * 3600; // 1 hour
     logger.debug(`Indexing completed. Next run planned at ${new Date(new Date().getTime() + runEvery).toUTCString()}`);
     setTimeout(() => this.reindex(), runEvery);
+  }
+
+  /**
+   * Index transactions related to Angor projects.
+   */
+  public async indexAngorTransactions(): Promise<void> {
+    // All indexed blocks.
+    const indexedBlocks = await BlocksRepository.$getIndexedBlocks();
+    // Sort indexed blocks by height, the lowest height should be in the beginning.
+    // It is necessary to index transactions for project creations before
+    // investment transactions.
+    const sortedBlocks = indexedBlocks.sort(
+      (
+        b1: { height: number; hash: string },
+        b2: { height: number; hash: string }
+      ) => b1.height - b2.height
+    );
+
+    for (const indexedBlock of sortedBlocks) {
+      // Transaction IDs in the block.
+      const transactionIds = await bitcoinApi.$getTxIdsForBlock(
+        indexedBlock.hash
+      );
+
+      for (const transactionId of transactionIds) {
+        // Hex of the transaction.
+        const transactionHex = await bitcoinApi.$getTransactionHex(
+          transactionId
+        );
+
+        const angorDecoder = new AngorTransactionDecoder(
+          transactionHex,
+          AngorSupportedNetworks.Testnet
+        );
+
+        // Try to decode and store transaction as Angor project creation transaction.
+        await angorDecoder
+          .decodeAndStoreProjectCreationTransaction(
+            AngorTransactionStatus.Confirmed
+          )
+          .catch(async () => {
+            // If transaction is not an Angor project creation transaction,
+            // try to decode and store it as Angor investment transaction.
+            await angorDecoder
+              .decodeAndStoreInvestmentTransaction(
+                AngorTransactionStatus.Confirmed
+              )
+              .catch(() => {
+                // Ignore the error.
+              });
+          });
+      }
+    }
+
+    logger.info('Indexing Angor transactions completed.');
   }
 }
 

@@ -932,6 +932,10 @@ class Blocks {
         }
 
         await blocksRepository.$saveBlockInDatabase(blockExtended);
+        this.updateTimerProgress(
+          timer,
+          `saved ${this.currentBlockHeight} to database`
+        );
         // New block is saved to the DB.
         // Decode block transaction with Angor decoder to identify transactions
         // related to Angor projects.

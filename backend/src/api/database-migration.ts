@@ -107,6 +107,14 @@ class DatabaseMigration {
     const isBitcoin = ['mainnet', 'testnet', 'signet'].includes(config.MEMPOOL.NETWORK);
 
     await this.$executeQuery(
+      this.getCreateElementsTableQuery(),
+      await this.$checkIfTableExists('elements_pegs')
+    );
+    await this.$executeQuery(
+      this.getCreateStatisticsQuery(),
+      await this.$checkIfTableExists('statistics')
+    );
+    await this.$executeQuery(
       this.getCreateAngorProjectsTableQuery(),
       await this.$checkIfTableExists('angor_projects')
     );

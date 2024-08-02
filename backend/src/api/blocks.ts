@@ -30,6 +30,11 @@ import redisCache from './redis-cache';
 import rbfCache from './rbf-cache';
 import { calcBitsDifference } from './difficulty-adjustment';
 import AccelerationRepository from '../repositories/AccelerationRepository';
+import {
+  AngorTransactionDecoder,
+  AngorSupportedNetworks,
+  AngorTransactionStatus,
+} from '../angor/AngorTransactionDecoder';
 
 class Blocks {
   private blocks: BlockExtended[] = [];

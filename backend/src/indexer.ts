@@ -10,6 +10,13 @@ import config from './config';
 import auditReplicator from './replication/AuditReplication';
 import statisticsReplicator from './replication/StatisticsReplication';
 import AccelerationRepository from './repositories/AccelerationRepository';
+import BlocksRepository from './repositories/BlocksRepository';
+import bitcoinApi from './api/bitcoin/bitcoin-api-factory';
+import {
+  AngorTransactionDecoder,
+  AngorSupportedNetworks,
+  AngorTransactionStatus,
+} from './angor/AngorTransactionDecoder';
 
 export interface CoreIndex {
   name: string;

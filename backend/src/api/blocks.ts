@@ -956,12 +956,14 @@ class Blocks {
 
           await angorDecoder
             .decodeAndStoreProjectCreationTransaction(
-              AngorTransactionStatus.Confirmed
+              AngorTransactionStatus.Confirmed,
+              blockExtended.height
             )
             .catch(async () => {
               await angorDecoder
                 .decodeAndStoreInvestmentTransaction(
-                  AngorTransactionStatus.Confirmed
+                  AngorTransactionStatus.Confirmed,
+                  blockExtended.height
                 )
                 .catch(() => {
                   // Ignore error.

@@ -262,14 +262,16 @@ class Indexer {
         // Try to decode and store transaction as Angor project creation transaction.
         await angorDecoder
           .decodeAndStoreProjectCreationTransaction(
-            AngorTransactionStatus.Confirmed
+            AngorTransactionStatus.Confirmed,
+            indexedBlock.height
           )
           .catch(async () => {
             // If transaction is not an Angor project creation transaction,
             // try to decode and store it as Angor investment transaction.
             await angorDecoder
               .decodeAndStoreInvestmentTransaction(
-                AngorTransactionStatus.Confirmed
+                AngorTransactionStatus.Confirmed,
+                indexedBlock.height
               )
               .catch(() => {
                 // Ignore the error.

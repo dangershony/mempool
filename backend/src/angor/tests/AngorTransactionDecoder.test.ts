@@ -21,6 +21,8 @@ describe('AngorTransactionDecoder', () => {
       projectId: 'angor1qg2pvel3j8ka62dwvmlytv6hwkz7hmk2mms7qll',
       nPub: 'c749d81fc42037e5b9f7b32ae266cbce75019ce6771be6877d3c509e97e39c14',
       addressOnFeeOutput: 'tb1qg2pvel3j8ka62dwvmlytv6hwkz7hmk2m0ncfee',
+      txid: '00b78119bb6eff9f64b2d29948ddd830f405b18dfdb802a3ec2df4eacfcd1f40',
+      blockHeight: 40000,
     };
 
     const angorDecoder = new AngorTransactionDecoder(
@@ -145,28 +147,39 @@ describe('AngorTransactionDecoder', () => {
 
         const transactionStatus = AngorTransactionStatus.Confirmed;
 
-        await angorDecoder.decodeAndStoreProjectCreationTransaction(
-          transactionStatus
-        );
+        const {
+          projectId,
+          nPub,
+          addressOnFeeOutput,
+          founderKeyHex,
+          txid,
+          blockHeight,
+        } = data;
 
-        const { projectId, nPub, addressOnFeeOutput } = data;
+        await angorDecoder.decodeAndStoreProjectCreationTransaction(
+          transactionStatus,
+          blockHeight
+        );
 
         expect(setProjectSpy).toHaveBeenCalledWith(
           projectId,
           nPub,
           addressOnFeeOutput,
-          transactionStatus
+          transactionStatus,
+          founderKeyHex,
+          txid,
+          blockHeight
         );
       });
     });
 
-    describe('decompileOpReturnScript', () => {
+    describe('decompileProjectCreationOpReturnScript', () => {
       afterEach(() => {
         jest.restoreAllMocks();
       });
 
       it('should return 2 chunks', () => {
-        const chunks = angorDecoder['decompileOpReturnScript']();
+        const chunks = angorDecoder['decompileProjectCreationOpReturnScript']();
 
         expect(chunks.length).toEqual(2);
 
@@ -178,15 +191,15 @@ describe('AngorTransactionDecoder', () => {
           .spyOn(bitcoinJS.script, 'decompile')
           .mockImplementation(() => null);
 
-        expect(() => angorDecoder['decompileOpReturnScript']()).toThrow(
-          new Error(`Script decompilation failed.`)
-        );
+        expect(() =>
+          angorDecoder['decompileProjectCreationOpReturnScript']()
+        ).toThrow(new Error(`Script decompilation failed.`));
       });
     });
 
     describe('getFounderKey', () => {
       it('should return founder key in hex encoding', () => {
-        const chunks = angorDecoder['decompileOpReturnScript']();
+        const chunks = angorDecoder['decompileProjectCreationOpReturnScript']();
 
         expect(angorDecoder['getFounderKeyHex'](chunks)).toEqual(
           data.founderKeyHex
@@ -196,7 +209,7 @@ describe('AngorTransactionDecoder', () => {
 
     describe('getKeyHash', () => {
       it('should return founder key hash in hex encoding', () => {
-        const chunks = angorDecoder['decompileOpReturnScript']();
+        const chunks = angorDecoder['decompileProjectCreationOpReturnScript']();
         const keyHex = angorDecoder['getFounderKeyHex'](chunks);
 
         expect(angorDecoder['getKeyHash'](keyHex)).toEqual(
@@ -207,7 +220,7 @@ describe('AngorTransactionDecoder', () => {
 
     describe('hashToInt', () => {
       it('should return integer representation of founder key hash', () => {
-        const chunks = angorDecoder['decompileOpReturnScript']();
+        const chunks = angorDecoder['decompileProjectCreationOpReturnScript']();
         const keyHex = angorDecoder['getFounderKeyHex'](chunks);
         const keyHash = angorDecoder['getKeyHash'](keyHex);
 
@@ -218,7 +231,7 @@ describe('AngorTransactionDecoder', () => {
     });
 
     describe('getProjectIdDerivation', () => {
-      const chunks = angorDecoder['decompileOpReturnScript']();
+      const chunks = angorDecoder['decompileProjectCreationOpReturnScript']();
       const keyHex = angorDecoder['getFounderKeyHex'](chunks);
 
       afterEach(() => {
@@ -254,7 +267,7 @@ describe('AngorTransactionDecoder', () => {
 
     describe('getProjectId', () => {
       it('should return project id', () => {
-        const chunks = angorDecoder['decompileOpReturnScript']();
+        const chunks = angorDecoder['decompileProjectCreationOpReturnScript']();
         const keyHex = angorDecoder['getFounderKeyHex'](chunks);
         const keyHash = angorDecoder['getKeyHash'](keyHex);
         const keyHashInt = angorDecoder['hashToInt'](keyHash);
@@ -275,26 +288,31 @@ describe('AngorTransactionDecoder', () => {
   });
 
   describe('Decoding investment transaction for Angor project', () => {
+    const data = {
+      transactionHex:
+        '010000000001017bdbff3cb9461c9d299af512baa2f9c6b0db157376a688ff1b09ae6692d113100200000000ffffffff0680841e0000000000160014060978a8f215edcb42b8a571922e691df2e6905e0000000000000000236a2102e6c8752b2fe17ccda2d77d199bfa0f6c7e5cd5190fb6a93bf10a2f3d67be48cd002d31010000000022512074d1d487eafc15e7237ba317aafd5179933ec8e0b852c0a814e15c9d95310a8a00879303000000002251206a4f6fc475c98868646c8fcee1efb07d9e193a0525daf4ccf001a22a74e9a7c5000e27070000000022512038baa923ce2e6412a90e29cf0989900e003158e181e5dc5a96e36db795888cf8ac48fb1d01000000160014885d29c290b21db178d7778754706bd6030340710248304502210096d00e38fa85c6ea50276354c5d3d10040444cb933eb595341a18d05301582b202205864116b6159140ea0dcf9010b9126bd06bbf7f6f842031a22abbdf450224dc8012103e1bd9cd9175250059f88f0dca122c5ce16a15cefed5019d674a29c31203f53cd00000000',
+      transactionId:
+        'd066cdecd4064f368411cf0b0bc8ebbc1265937c78867eebaf44b042ccb691e8',
+      feeAmount: 2000000,
+      addressOnFeeOutput: 'tb1qqcyh328jzhkuks4c54ceytnfrhewdyz7jqfz2a',
+      founderPubKey:
+        '02e6c8752b2fe17ccda2d77d199bfa0f6c7e5cd5190fb6a93bf10a2f3d67be48cd',
+    };
+
+    const angorDecoder = new AngorTransactionDecoder(
+      data.transactionHex,
+      AngorSupportedNetworks.Testnet
+    );
+    const transactionStatus = AngorTransactionStatus.Confirmed;
+
     describe('decodeAndStoreInvestmentTransaction', () => {
-      const data = {
-        transactionHex:
-          '010000000001017bdbff3cb9461c9d299af512baa2f9c6b0db157376a688ff1b09ae6692d113100200000000ffffffff0680841e0000000000160014060978a8f215edcb42b8a571922e691df2e6905e0000000000000000236a2102e6c8752b2fe17ccda2d77d199bfa0f6c7e5cd5190fb6a93bf10a2f3d67be48cd002d31010000000022512074d1d487eafc15e7237ba317aafd5179933ec8e0b852c0a814e15c9d95310a8a00879303000000002251206a4f6fc475c98868646c8fcee1efb07d9e193a0525daf4ccf001a22a74e9a7c5000e27070000000022512038baa923ce2e6412a90e29cf0989900e003158e181e5dc5a96e36db795888cf8ac48fb1d01000000160014885d29c290b21db178d7778754706bd6030340710248304502210096d00e38fa85c6ea50276354c5d3d10040444cb933eb595341a18d05301582b202205864116b6159140ea0dcf9010b9126bd06bbf7f6f842031a22abbdf450224dc8012103e1bd9cd9175250059f88f0dca122c5ce16a15cefed5019d674a29c31203f53cd00000000',
-        transactionId:
-          'd066cdecd4064f368411cf0b0bc8ebbc1265937c78867eebaf44b042ccb691e8',
-        feeAmount: 2000000,
-        addressOnFeeOutput: 'tb1qqcyh328jzhkuks4c54ceytnfrhewdyz7jqfz2a',
-      };
-
-      const angorDecoder = new AngorTransactionDecoder(
-        data.transactionHex,
-        AngorSupportedNetworks.Testnet
-      );
-      const transactionStatus = AngorTransactionStatus.Confirmed;
-
       it('should call $getProject method of AngorProjectRepository', async () => {
-        const getProjectSpy = jest.spyOn(AngorProjectRepository, '$getProject');
+        const getProjectSpy = jest.spyOn(
+          AngorProjectRepository,
+          '$getProjectByAddressOnFeeOutput'
+        );
 
-        getProjectSpy.mockImplementation(() => Promise.resolve([]));
+        getProjectSpy.mockImplementation(() => Promise.resolve(undefined));
 
         await angorDecoder.decodeAndStoreInvestmentTransaction(
           transactionStatus
@@ -307,8 +325,16 @@ describe('AngorTransactionDecoder', () => {
 
       it('should call $setInvestment method of AngorInvestmentRepository', async () => {
         jest
-          .spyOn(AngorProjectRepository, '$getProject')
-          .mockImplementation(() => Promise.resolve([{}]));
+          .spyOn(AngorProjectRepository, '$getProjectByAddressOnFeeOutput')
+          .mockImplementation(() =>
+            Promise.resolve({
+              founder_key: '',
+              npub: '',
+              id: '',
+              created_on_block: 1,
+              txid: '',
+            })
+          );
 
         const setInvestmentSpy = jest.spyOn(
           AngorInvestmentRepository,
@@ -321,14 +347,46 @@ describe('AngorTransactionDecoder', () => {
           transactionStatus
         );
 
-        const { transactionId, feeAmount, addressOnFeeOutput } = data;
+        const { transactionId, feeAmount, addressOnFeeOutput, founderPubKey } =
+          data;
 
         expect(setInvestmentSpy).toHaveBeenCalledWith(
           transactionId,
-          feeAmount,
+          feeAmount * 100,
           addressOnFeeOutput,
-          transactionStatus
+          transactionStatus,
+          founderPubKey,
+          undefined,
+          undefined
         );
+      });
+    });
+
+    describe('decompileInvestmentOpReturnScript', () => {
+      afterEach(() => {
+        jest.restoreAllMocks();
+      });
+
+      it('should return 1 chunk with Buffer length equal to 33', () => {
+        const chunks = angorDecoder['decompileInvestmentOpReturnScript']();
+
+        expect(chunks.length).toEqual(1);
+
+        chunks.forEach((chunk) => {
+          expect(typeof chunk).toEqual('string');
+
+          expect(Buffer.from(chunk, 'hex').byteLength).toEqual(33);
+        });
+      });
+
+      it('should throw an error if script decompilation failed', () => {
+        jest
+          .spyOn(bitcoinJS.script, 'decompile')
+          .mockImplementation(() => null);
+
+        expect(() =>
+          angorDecoder['decompileProjectCreationOpReturnScript']()
+        ).toThrow(new Error(`Script decompilation failed.`));
       });
     });
   });

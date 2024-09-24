@@ -4,7 +4,9 @@ import * as tinySecp256k1 from 'tiny-secp256k1';
 import BIP32Factory from 'bip32';
 import crypto from 'crypto';
 import { bech32 } from 'bech32';
-import AngorProjectRepository from '../repositories/AngorProjectRepository';
+import AngorProjectRepository, {
+  Project,
+} from '../repositories/AngorProjectRepository';
 import AngorInvestmentRepository from '../repositories/AngorInvestmentRepository';
 
 /**
@@ -52,13 +54,15 @@ export class AngorTransactionDecoder {
    * Decode and store transaction as Angor project creation transaction.
    * If transaction is not an Angor project creation transaction, an error will be thrown.
    * @param transactionStatus - status of the transaction.
+   * @param createdOnBlock - block height(optional).
    */
   public async decodeAndStoreProjectCreationTransaction(
-    transactionStatus: AngorTransactionStatus
+    transactionStatus: AngorTransactionStatus,
+    createdOnBlock?: number
   ): Promise<void> {
     this.validateProjectCreationTransaction();
 
-    const chunks = this.decompileOpReturnScript();
+    const chunks = this.decompileProjectCreationOpReturnScript();
     const founderKeyHex = this.getFounderKeyHex(chunks);
     const founderKeyHash = this.getKeyHash(founderKeyHex);
     const founderKeyHashInt = this.hashToInt(founderKeyHash);
@@ -66,13 +70,17 @@ export class AngorTransactionDecoder {
     const projectId = this.getProjectId(projectIdDerivation);
     const nostrPubKey = this.getNostrPubKey();
     const addressOnFeeOutput = this.getAddressOnFeeOutput();
+    const txid = this.transaction.getId();
 
     // Store Angor project in the DB.
     await this.storeProjectInfo(
       projectId,
       nostrPubKey,
       addressOnFeeOutput,
-      transactionStatus
+      transactionStatus,
+      founderKeyHex,
+      txid,
+      createdOnBlock
     );
 
     // If transaction is confirmed (in the block), update statuses
@@ -89,9 +97,11 @@ export class AngorTransactionDecoder {
    * Decode and store transaction as Angor investment transaction.
    * If transaction is not an Angor investment transaction, an error will be thrown.
    * @param transactionStatus - status of the transaction.
+   * @param createdOnBlock - block height(optional).
    */
   public async decodeAndStoreInvestmentTransaction(
-    transactionStatus: AngorTransactionStatus
+    transactionStatus: AngorTransactionStatus,
+    createdOnBlock?: number
   ): Promise<void> {
     this.validateInvestmentTransaction();
 
@@ -106,14 +116,20 @@ export class AngorTransactionDecoder {
     }
 
     const txid = this.transaction.getId();
-    const amount = this.transaction.outs[0].value;
+    // This amount is Angor's fee(1%), so to get actual investment amount it has to be multiplied by 100
+    const amount = this.transaction.outs[0].value * 100;
+    const [investorPubKey, secretHash] =
+      this.decompileInvestmentOpReturnScript();
 
     // Store Angor investment in the DB.
     await this.storeInvestmentInfo(
       txid,
       amount,
       addressOnFeeOutput,
-      transactionStatus
+      transactionStatus,
+      investorPubKey,
+      secretHash,
+      createdOnBlock
     );
   }
 
@@ -171,24 +187,25 @@ export class AngorTransactionDecoder {
   /**
    * Fetches Angor project by address on fee output from the DB.
    * @param address - address on fee output.
-   * @returns - promise that resolves into an array of Angor projects.
+   * @returns - promise that resolves into Angor project or undefined.
    */
-  private async getProject(address): Promise<any> {
-    const project = await AngorProjectRepository.$getProject(address);
+  private async getProject(address): Promise<Project | undefined> {
+    const project =
+      await AngorProjectRepository.$getProjectByAddressOnFeeOutput(address);
 
-    if (project.length) {
-      return project[0];
+    if (project) {
+      return project;
     }
 
     return undefined;
   }
 
   /**
-   * Decompiles (splits into chunks) OP_RETURN script.
+   * Decompiles (splits into chunks) OP_RETURN script of the project creation transaction.
    * @param transaction - an object representing bitcoin transaction.
    * @returns - an array of strings representing script chunks.
    */
-  private decompileOpReturnScript(): string[] {
+  private decompileProjectCreationOpReturnScript(): string[] {
     const { transaction } = this;
 
     const script: Buffer = transaction.outs[1].script;
@@ -197,6 +214,7 @@ export class AngorTransactionDecoder {
     const decompiled = bitcoinJS.script.decompile(script);
 
     const errorBase = `Script decompilation failed.`;
+
     if (!decompiled) {
       throw new Error(errorBase);
     }
@@ -217,11 +235,60 @@ export class AngorTransactionDecoder {
 
     // Throw an error if the byte length of the second chunk is not 33.
     if (Buffer.from(chunks[1], 'hex').byteLength !== 33) {
-      throw new Error(`Script decompilation failed. Wrong second chunk.`);
+      throw new Error(`${errorBase} Wrong second chunk.`);
     }
 
     // Throw an error if the byte length of the third chunk is not 32.
     if (Buffer.from(chunks[2], 'hex').byteLength !== 32) {
+      throw new Error(`${errorBase} Wrong third chunk.`);
+    }
+
+    // Remove the first chunk (OP_RETURN) as it is not useful anymore.
+    chunks.splice(0, 1);
+
+    return chunks;
+  }
+
+  /**
+   * Decompiles (splits into chunks) OP_RETURN script of the investment transaction.
+   * @param transaction - an object representing bitcoin transaction.
+   * @returns - an array of strings representing script chunks.
+   */
+  private decompileInvestmentOpReturnScript(): string[] {
+    const { transaction } = this;
+
+    const script: Buffer = transaction.outs[1].script;
+
+    // Decompiled is an array of Buffers.
+    const decompiled = bitcoinJS.script.decompile(script);
+
+    const errorBase = `Script decompilation failed.`;
+
+    if (!decompiled) {
+      throw new Error(errorBase);
+    }
+
+    // Converts decompiled OP_RETURN script into an ASM (Assembly) string
+    // representation and splits this string into chunks.
+    const chunks = bitcoinJS.script.toASM(decompiled).split(' ');
+
+    // Throw an error if the chunks amount is incorrect.
+    if (chunks.length < 2) {
+      throw new Error(`${errorBase} Wrong chunk amount.`);
+    }
+
+    // Throw an error if the first chunk is not OP_RETURN.
+    if (chunks[0] !== 'OP_RETURN') {
+      throw new Error(`${errorBase} Wrong first chunk.`);
+    }
+
+    // Throw an error if the byte length of the second chunk is not 33.
+    if (Buffer.from(chunks[1], 'hex').byteLength !== 33) {
+      throw new Error(`${errorBase} Wrong second chunk.`);
+    }
+
+    // Throw an error if third chunk is present and the its byte length is not 32.
+    if (chunks[2] && Buffer.from(chunks[2], 'hex').byteLength !== 32) {
       throw new Error(`${errorBase} Wrong third chunk.`);
     }
 
@@ -342,7 +409,7 @@ export class AngorTransactionDecoder {
    * @returns - string representing Nostr public key of Angor project.
    */
   private getNostrPubKey(): string {
-    const chunks = this.decompileOpReturnScript();
+    const chunks = this.decompileProjectCreationOpReturnScript();
 
     return chunks[1];
   }
@@ -369,13 +436,19 @@ export class AngorTransactionDecoder {
     projectId: string,
     nostrPubKey: string,
     addressOnFeeOutput: string,
-    transactionStatus: AngorTransactionStatus
+    transactionStatus: AngorTransactionStatus,
+    founderKey: string,
+    txid: string,
+    createdOnBlock?: number
   ): Promise<void> {
     await AngorProjectRepository.$setProject(
       projectId,
       nostrPubKey,
       addressOnFeeOutput,
-      transactionStatus
+      transactionStatus,
+      founderKey,
+      txid,
+      createdOnBlock
     );
   }
 
@@ -390,13 +463,19 @@ export class AngorTransactionDecoder {
     txid: string,
     amount: number,
     addressOnFeeOutput: string,
-    transactionStatus: AngorTransactionStatus
+    transactionStatus: AngorTransactionStatus,
+    investorPubKey: string,
+    secretHash?: string,
+    createdOnBlock?: number
   ): Promise<void> {
     await AngorInvestmentRepository.$setInvestment(
       txid,
       amount,
       addressOnFeeOutput,
-      transactionStatus
+      transactionStatus,
+      investorPubKey,
+      secretHash,
+      createdOnBlock
     );
   }
 

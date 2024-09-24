@@ -1265,8 +1265,11 @@ class DatabaseMigration {
       npub CHAR(64) NOT NULL,
       address_on_fee_output CHAR(51) NOT NULL,
       creation_transaction_status VARCHAR(10) NOT NULL,
+      created_on_block INT(10),
+      txid VARCHAR(64) NOT NULL,
+      founder_key VARCHAR(66) NOT NULL,
       PRIMARY KEY (id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8;`;
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8;`;
   }
 
   private getCreateAngorInvestmentsTableQuery(): string {
@@ -1275,6 +1278,10 @@ class DatabaseMigration {
       amount_sats BIGINT NOT NULL,
       address_on_fee_output CHAR(51) NOT NULL,
       transaction_status VARCHAR(13) NOT NULL,
+      created_on_block INT(10),
+      investor_npub CHAR(66) NOT NULL,
+      secret_hash CHAR(34) NOT NULL,
+      is_seeder BOOLEAN NOT NULL,
       PRIMARY KEY (txid)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8;`;
   }

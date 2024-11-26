@@ -1,14 +1,14 @@
 import { Inject, Injectable, PLATFORM_ID, LOCALE_ID } from '@angular/core';
 import { ReplaySubject, BehaviorSubject, Subject, fromEvent, Observable } from 'rxjs';
-import { Transaction } from '../interfaces/electrs.interface';
-import { AccelerationDelta, HealthCheckHost, IBackendInfo, MempoolBlock, MempoolBlockUpdate, MempoolInfo, Recommendedfees, ReplacedTransaction, ReplacementInfo, isMempoolState } from '../interfaces/websocket.interface';
-import { Acceleration, AccelerationPosition, BlockExtended, CpfpInfo, DifficultyAdjustment, MempoolPosition, OptimizedMempoolStats, RbfTree, TransactionStripped } from '../interfaces/node-api.interface';
+import { AddressTxSummary, Transaction } from '@interfaces/electrs.interface';
+import { AccelerationDelta, HealthCheckHost, IBackendInfo, MempoolBlock, MempoolBlockUpdate, MempoolInfo, Recommendedfees, ReplacedTransaction, ReplacementInfo, isMempoolState } from '@interfaces/websocket.interface';
+import { Acceleration, AccelerationPosition, BlockExtended, CpfpInfo, DifficultyAdjustment, MempoolPosition, OptimizedMempoolStats, RbfTree, TransactionStripped } from '@interfaces/node-api.interface';
 import { Router, NavigationStart } from '@angular/router';
 import { isPlatformBrowser } from '@angular/common';
-import { filter, map, scan, shareReplay } from 'rxjs/operators';
-import { StorageService } from './storage.service';
-import { hasTouchScreen } from '../shared/pipes/bytes-pipe/utils';
-import { ActiveFilter } from '../shared/filters.utils';
+import { filter, map, scan, share, shareReplay } from 'rxjs/operators';
+import { StorageService } from '@app/services/storage.service';
+import { hasTouchScreen } from '@app/shared/pipes/bytes-pipe/utils';
+import { ActiveFilter } from '@app/shared/filters.utils';
 
 export interface MarkBlockState {
   blockHeight?: number;
@@ -68,14 +68,22 @@ export interface Env {
   AUDIT: boolean;
   MAINNET_BLOCK_AUDIT_START_HEIGHT: number;
   TESTNET_BLOCK_AUDIT_START_HEIGHT: number;
+  TESTNET4_BLOCK_AUDIT_START_HEIGHT: number;
   SIGNET_BLOCK_AUDIT_START_HEIGHT: number;
+  MAINNET_TX_FIRST_SEEN_START_HEIGHT: number;
+  TESTNET_TX_FIRST_SEEN_START_HEIGHT: number;
+  TESTNET4_TX_FIRST_SEEN_START_HEIGHT: number;
+  SIGNET_TX_FIRST_SEEN_START_HEIGHT: number;
   HISTORICAL_PRICE: boolean;
   ACCELERATOR: boolean;
+  ACCELERATOR_BUTTON: boolean;
   PUBLIC_ACCELERATIONS: boolean;
   ADDITIONAL_CURRENCIES: boolean;
   GIT_COMMIT_HASH_MEMPOOL_SPACE?: string;
   PACKAGE_JSON_VERSION_MEMPOOL_SPACE?: string;
+  SERVICES_API?: string;
   customize?: Customization;
+  PROD_DOMAINS: string[];
 }
 
 const defaultEnv: Env = {
@@ -104,11 +112,19 @@ const defaultEnv: Env = {
   'AUDIT': false,
   'MAINNET_BLOCK_AUDIT_START_HEIGHT': 0,
   'TESTNET_BLOCK_AUDIT_START_HEIGHT': 0,
+  'TESTNET4_BLOCK_AUDIT_START_HEIGHT': 0,
   'SIGNET_BLOCK_AUDIT_START_HEIGHT': 0,
+  'MAINNET_TX_FIRST_SEEN_START_HEIGHT': 0,
+  'TESTNET_TX_FIRST_SEEN_START_HEIGHT': 0,
+  'TESTNET4_TX_FIRST_SEEN_START_HEIGHT': 0,
+  'SIGNET_TX_FIRST_SEEN_START_HEIGHT': 0,
   'HISTORICAL_PRICE': true,
   'ACCELERATOR': false,
+  'ACCELERATOR_BUTTON': true,
   'PUBLIC_ACCELERATIONS': false,
   'ADDITIONAL_CURRENCIES': false,
+  'SERVICES_API': 'https://mempool.space/api/v1/services',
+  'PROD_DOMAINS': [],
 };
 
 @Injectable({
@@ -127,6 +143,7 @@ export class StateService {
   latestBlockHeight = -1;
   blocks: BlockExtended[] = [];
   mempoolSequence: number;
+  mempoolBlockState: { block: number, transactions: { [txid: string]: TransactionStripped} };
 
   backend$ = new BehaviorSubject<'esplora' | 'electrum' | 'none'>('esplora');
   networkChanged$ = new ReplaySubject<string>(1);
@@ -134,12 +151,12 @@ export class StateService {
   blocksSubject$ = new BehaviorSubject<BlockExtended[]>([]);
   blocks$: Observable<BlockExtended[]>;
   transactions$ = new BehaviorSubject<TransactionStripped[]>(null);
-  conversions$ = new ReplaySubject<any>(1);
+  conversions$ = new ReplaySubject<Record<string, number>>(1);
   bsqPrice$ = new ReplaySubject<number>(1);
   mempoolInfo$ = new ReplaySubject<MempoolInfo>(1);
   mempoolBlocks$ = new ReplaySubject<MempoolBlock[]>(1);
   mempoolBlockUpdate$ = new Subject<MempoolBlockUpdate>();
-  liveMempoolBlockTransactions$: Observable<{ [txid: string]: TransactionStripped}>;
+  liveMempoolBlockTransactions$: Observable<{ block: number, transactions: { [txid: string]: TransactionStripped} }>;
   accelerations$ = new Subject<AccelerationDelta>();
   liveAccelerations$: Observable<Acceleration[]>;
   txConfirmed$ = new Subject<[string, BlockExtended]>();
@@ -154,6 +171,7 @@ export class StateService {
   mempoolRemovedTransactions$ = new Subject<Transaction>();
   multiAddressTransactions$ = new Subject<{ [address: string]: { mempool: Transaction[], confirmed: Transaction[], removed: Transaction[] }}>();
   blockTransactions$ = new Subject<Transaction>();
+  walletTransactions$ = new Subject<Transaction[]>();
   isLoadingWebSocket$ = new ReplaySubject<boolean>(1);
   isLoadingMempool$ = new BehaviorSubject<boolean>(true);
   vbytesPerSecond$ = new ReplaySubject<number>(1);
@@ -200,10 +218,18 @@ export class StateService {
     const browserWindow = window || {};
     // @ts-ignore
     const browserWindowEnv = browserWindow.__env || {};
+    if (browserWindowEnv.PROD_DOMAINS && typeof(browserWindowEnv.PROD_DOMAINS) === 'string') {
+      browserWindowEnv.PROD_DOMAINS = browserWindowEnv.PROD_DOMAINS.split(',');
+    }
+
     this.env = Object.assign(defaultEnv, browserWindowEnv);
 
     if (defaultEnv.BASE_MODULE !== 'mempool') {
       this.env.MINING_DASHBOARD = false;
+    }
+
+    if (document.location.hostname.endsWith('.onion')) {
+      this.env.SERVICES_API = 'http://mempoolhqx4isw62xs7abwphsq7ldayuidyx2v2oethdhhj6mlo2r6ad.onion/api/v1/services';
     }
 
     if (this.isBrowser) {
@@ -223,33 +249,40 @@ export class StateService {
       }
     });
 
-    if (this.referrer === 'https://cash.app/' && window.innerWidth < 850 && window.location.pathname.startsWith('/tx/')) {
-      this.router.navigate(['/tracker/' + window.location.pathname.slice(4)]);
-    }
-
-    this.liveMempoolBlockTransactions$ = this.mempoolBlockUpdate$.pipe(scan((transactions: { [txid: string]: TransactionStripped }, change: MempoolBlockUpdate): { [txid: string]: TransactionStripped } => {
+    this.liveMempoolBlockTransactions$ = this.mempoolBlockUpdate$.pipe(scan((acc: { block: number, transactions: { [txid: string]: TransactionStripped } }, change: MempoolBlockUpdate): { block: number, transactions: { [txid: string]: TransactionStripped } } => {
       if (isMempoolState(change)) {
         const txMap = {};
         change.transactions.forEach(tx => {
           txMap[tx.txid] = tx;
         });
-        return txMap;
+        this.mempoolBlockState = {
+          block: change.block,
+          transactions: txMap
+        };
+        return this.mempoolBlockState;
       } else {
         change.added.forEach(tx => {
-          transactions[tx.txid] = tx;
+          acc.transactions[tx.txid] = tx;
         });
         change.removed.forEach(txid => {
-          delete transactions[txid];
+          delete acc.transactions[txid];
         });
         change.changed.forEach(tx => {
-          if (transactions[tx.txid]) {
-            transactions[tx.txid].rate = tx.rate;
-            transactions[tx.txid].acc = tx.acc;
+          if (acc.transactions[tx.txid]) {
+            acc.transactions[tx.txid].rate = tx.rate;
+            acc.transactions[tx.txid].acc = tx.acc;
           }
         });
-        return transactions;
+        this.mempoolBlockState = {
+          block: change.block,
+          transactions: acc.transactions
+        };
+        return this.mempoolBlockState;
       }
-    }, {}));
+    }, {}),
+    share()
+    );
+    this.liveMempoolBlockTransactions$.subscribe();
 
     // Emits the full list of pending accelerations each time it changes
     this.liveAccelerations$ = this.accelerations$.pipe(
@@ -408,6 +441,10 @@ export class StateService {
 
   isLiquid() {
     return this.network === 'liquid' || this.network === 'liquidtestnet';
+  }
+
+  isMainnet(): boolean {
+    return this.env.ROOT_NETWORK === '' && this.network === '';
   }
 
   isAnyTestnet(): boolean {

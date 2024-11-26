@@ -6176,10 +6176,10 @@ export const restApiDocsData = [
     type: "endpoint",
     category: "transactions",
     httpRequestMethod: "GET",
-    fragment: "get-transaction-rbf-history",
-    title: "GET Transaction RBF History",
+    fragment: "get-transaction-rbf-timeline",
+    title: "GET Transaction RBF Timeline",
     description: {
-      default: "Returns the RBF tree history of a transaction."
+      default: "Returns the RBF tree timeline of a transaction."
     },
     urlString: "v1/tx/:txId/rbf",
     showConditions: bitcoinNetworks,
@@ -8993,7 +8993,7 @@ export const restApiDocsData = [
     fragment: "accelerator-estimate",
     title: "POST Calculate Estimated Costs",
     description: {
-      default: "<p>Returns estimated costs to accelerate a transaction. Optionally set the <code>api_key</code> header to get customized estimation.</p>"
+      default: "<p>Returns estimated costs to accelerate a transaction. Optionally set the <code>X-Mempool-Auth</code> header to get customized estimation.</p>"
     },
     urlString: "/v1/services/accelerator/estimate",
     showConditions: [""],
@@ -9009,7 +9009,7 @@ export const restApiDocsData = [
           esModule: [],
           commonJS: [],
           curl: ["txInput=ee13ebb99632377c15c94980357f674d285ac413452050031ea6dcd3e9b2dc29"],
-          headers: "api_key: stacksats",
+          headers: "X-Mempool-Auth: stacksats",
           response: `{
   "txSummary": {
     "txid": "ee13ebb99632377c15c94980357f674d285ac413452050031ea6dcd3e9b2dc29",
@@ -9017,14 +9017,85 @@ export const restApiDocsData = [
     "effectiveFee": 154,
     "ancestorCount": 1
   },
-  "cost": 3850,
-  "targetFeeRate": 26,
-  "nextBlockFee": 4004,
-  "userBalance": 99900000,
-  "mempoolBaseFee": 40000,
-  "vsizeFee": 50000,
-  "hasAccess": true
+  "cost": 1386,
+  "targetFeeRate": 10,
+  "nextBlockFee": 1540,
+  "userBalance": 0,
+  "mempoolBaseFee": 50000,
+  "vsizeFee": 0,
+  "pools": [
+    111,
+    102,
+    112,
+    142,
+    115
+  ],
+  "options": [
+    {
+      "fee": 1500
+    },
+    {
+      "fee": 3000
+    },
+    {
+      "fee": 12500
+    }
+  ],
+  "hasAccess": false,
+  "availablePaymentMethods": {
+    "bitcoin": {
+      "enabled": true,
+      "min": 1000,
+      "max": 10000000
+    },
+    "cashapp": {
+      "enabled": true,
+      "min": 10,
+      "max": 200
+    }
+  },
+  "unavailable": false
 }`,
+        },
+      }
+    }
+  },
+  {
+    options: { officialOnly: true },
+    type: "endpoint",
+    category: "accelerator-public",
+    httpRequestMethod: "POST",
+    fragment: "accelerator-get-invoice",
+    title: "POST Generate Acceleration Invoice",
+    description: {
+      default: "<p>Request a LN invoice to accelerate a transaction.</p>"
+    },
+    urlString: "/v1/services/payments/bitcoin",
+    showConditions: [""],
+    showJsExamples: showJsExamplesDefaultFalse,
+    codeExample: {
+      default: {
+        codeTemplate: {
+          curl: `%{1}" "[[hostname]][[baseNetworkUrl]]/api/v1/services/payments/bitcoin`, //custom interpolation technique handled in replaceCurlPlaceholder()
+          commonJS: ``,
+          esModule: ``
+        },
+        codeSampleMainnet: {
+          esModule: [],
+          commonJS: [],
+          curl: ["product=ee13ebb99632377c15c94980357f674d285ac413452050031ea6dcd3e9b2dc29&amount=12500"],
+          headers: "",
+          response: `[
+  {
+    "btcpayInvoiceId": "4Ww53d7VgSa596jmCFufe7",
+    "btcDue": "0.000625",
+    "addresses": {
+      "BTC": "bc1qcvqx2kr5mktd7gvym0atrrx0sn27mwv5kkghl3m78kegndm5t8ksvcqpja",
+      "BTC_LNURLPAY": null,
+      "BTC_LightningLike": "lnbc625u1pngl0wzpp56j7cqghsw2y5q7vdu9shmpxgpzsx4pqra4wcm9vdnvqegutplk2qdxj2pskjepqw3hjqnt9d4cx7mmvypqkxcm9d3jhyct5daezq2z0wfjx2u3qf9zr5grpvd3k2mr9wfshg6t0dckk2ef3xdjkyc3e8ymrxv3nxumkxvf4vvungwfcxqen2dmxxcmngepj8q6kzce5xyengdfjxq6nqvpnx9jkzdnyvdjrxefevgexgcej8yknzdejxqmrjd3jx5mrgdpj9ycqzpuxqrpr5sp58593dzj2uauaj3afa7x47qeam8k9yyqrh9qasj2ssdzstew6qv3q9qxpqysgqj8qshfkxmj0gfkly5xfydysvsx55uhnc6fgpw66uf6hl8leu07454axe2kq0q788yysg8guel2r36d6f75546nkhmdcmec4mmlft8dsq62rnsj"
+    }
+  }
+]`,
         },
       }
     }
@@ -9092,11 +9163,13 @@ export const restApiDocsData = [
       Filters can be applied:<ul>
       <li><code>status</code>: <code>all</code>, <code>requested</code>, <code>accelerating</code>, <code>mined</code>, <code>completed</code>, <code>failed</code></li>
       <li><code>timeframe</code>: <code>24h</code>, <code>3d</code>, <code>1w</code>, <code>1m</code>, <code>3m</code>, <code>6m</code>, <code>1y</code>, <code>2y</code>, <code>3y</code>, <code>4y</code>, <code>all</code></li>
-      <li><code>poolUniqueId</code>: any id from <a target="_blank" href="https://github.com/mempool/mining-pools/blob/master/pools-v2.json">https://github.com/mempool/mining-pools/blob/master/pools-v2.json</a>. <i>Note: This will return all acceleration requests accepted by the pool but the the listed transactions may have been mined by another pool.</i>
+      <li><code>minedByPoolUniqueId</code>: any id from <a target="_blank" href="https://github.com/mempool/mining-pools/blob/master/pools-v2.json">pools-v2.json</a>
       <li><code>blockHash</code>: a block hash</a>
       <li><code>blockHeight</code>: a block height</a>
       <li><code>page</code>: the requested page number if using pagination <i>(min: 1)</i></a>
       <li><code>pageLength</code>: the page lenght if using pagination <i>(min: 1, max: 50)</i></a>
+      <li><code>from</code>: unix timestamp (<i>overrides <code>timeframe</code></i>)</a>
+      <li><code>to</code>: unix timestamp (<i>overrides <code>timeframe</code></i>)</a>
       </ul></p>`
     },
     urlString: "/v1/services/accelerator/accelerations/history",
@@ -9116,17 +9189,22 @@ export const restApiDocsData = [
           headers: '',
           response: `[
   {
-    "txid": "d7e1796d8eb4a09d4e6c174e36cfd852f1e6e6c9f7df4496339933cd32cbdd1d",
-    "status": "completed",
-    "added": 1707421053,
-    "lastUpdated": 1707422952,
-    "effectiveFee": 146,
-    "effectiveVsize": 141,
-    "feeDelta": 14000,
-    "blockHash": "00000000000000000000482f0746d62141694b9210a813b97eb8445780a32003",
-    "blockHeight": 829559,
-    "bidBoost": 6102,
-    "pools": [111]
+    "txid": "f829900985aad885c13fb90555d27514b05a338202c7ef5d694f4813ad474487",
+    "status": "completed_provisional",
+    "added": 1728111527,
+    "lastUpdated": 1728112113,
+    "effectiveFee": 1385,
+    "effectiveVsize": 276,
+    "feeDelta": 3000,
+    "blockHash": "00000000000000000000cde89e34036ece454ca2d07ddd7f71ab46307ca87423",
+    "blockHeight": 864248,
+    "bidBoost": 65,
+    "boostVersion": "v2",
+    "pools": [
+      111,
+      115,
+    ],
+    "minedByPoolUniqueId": 115
   }
 ]`,
         },
@@ -9165,7 +9243,7 @@ export const restApiDocsData = [
           esModule: [],
           commonJS: [],
           curl: [],
-          headers: "api_key: stacksats",
+          headers: "X-Mempool-Auth: stacksats",
           response: `[
   {
     "type": "Bitcoin",
@@ -9213,7 +9291,7 @@ export const restApiDocsData = [
           esModule: [],
           commonJS: [],
           curl: [],
-          headers: "api_key: stacksats",
+          headers: "X-Mempool-Auth: stacksats",
           response: `{
   "balance": 99900000,
   "hold": 101829,
@@ -9229,7 +9307,7 @@ export const restApiDocsData = [
     category: "accelerator-private",
     httpRequestMethod: "POST",
     fragment: "accelerator-accelerate",
-    title: "POST Accelerate A Transaction",
+    title: "POST Accelerate A Transaction (Pro)",
     description: {
       default: "<p>Sends a request to accelerate a transaction.</p>"
     },
@@ -9247,7 +9325,7 @@ export const restApiDocsData = [
           esModule: [],
           commonJS: [],
           curl: ["txInput=ee13ebb99632377c15c94980357f674d285ac413452050031ea6dcd3e9b2dc29&userBid=21000000"],
-          headers: "api_key: stacksats",
+          headers: "X-Mempool-Auth: stacksats",
           response: `HTTP/1.1 200 OK`,
         },
       }
@@ -9277,7 +9355,7 @@ export const restApiDocsData = [
           esModule: [],
           commonJS: [],
           curl: [],
-          headers: "api_key: stacksats",
+          headers: "X-Mempool-Auth: stacksats",
           response: `[
   {
     "id": 89,

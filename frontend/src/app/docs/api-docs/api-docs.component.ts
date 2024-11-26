@@ -1,10 +1,10 @@
 import { Component, OnInit, Input, QueryList, AfterViewInit, ViewChildren } from '@angular/core';
-import { Env, StateService } from '../../services/state.service';
+import { Env, StateService } from '@app/services/state.service';
 import { Observable, merge, of, Subject, Subscription } from 'rxjs';
 import { tap, takeUntil } from 'rxjs/operators';
 import { ActivatedRoute } from "@angular/router";
-import { faqData, restApiDocsData, wsApiDocsData } from './api-docs-data';
-import { FaqTemplateDirective } from '../faq-template/faq-template.component';
+import { faqData, restApiDocsData, wsApiDocsData } from '@app/docs/api-docs/api-docs-data';
+import { FaqTemplateDirective } from '@app/docs/faq-template/faq-template.component';
 
 @Component({
   selector: 'app-api-docs',
@@ -33,6 +33,7 @@ export class ApiDocsComponent implements OnInit, AfterViewInit {
   showMobileEnterpriseUpsell: boolean = true;
   timeLtrSubscription: Subscription;
   timeLtr: boolean = this.stateService.timeLtr.value;
+  isMempoolSpaceBuild = this.stateService.isMempoolSpaceBuild;
 
   @ViewChildren(FaqTemplateDirective) faqTemplates: QueryList<FaqTemplateDirective>;
   dict = {};

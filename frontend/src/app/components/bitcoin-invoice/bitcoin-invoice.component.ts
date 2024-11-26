@@ -3,8 +3,8 @@ import { FormBuilder, FormGroup } from '@angular/forms';
 import { DomSanitizer, SafeUrl } from '@angular/platform-browser';
 import { ActivatedRoute } from '@angular/router';
 import { Subscription, of, timer } from 'rxjs';
-import { retry, switchMap, tap } from 'rxjs/operators';
-import { ServicesApiServices } from '../../services/services-api.service';
+import { filter, repeat, retry, switchMap, take, tap } from 'rxjs/operators';
+import { ServicesApiServices } from '@app/services/services-api.service';
 
 @Component({
   selector: 'app-bitcoin-invoice',
@@ -73,8 +73,11 @@ export class BitcoinInvoiceComponent implements OnInit, OnChanges, OnDestroy {
       this.paymentStatus = 4;
     }
     this.paymentStatusSubscription = this.apiService.getPaymentStatus$(this.invoice.btcpayInvoiceId).pipe(
-      retry({ delay: () => timer(2000)})
-    ).subscribe((result) => {
+      retry({ delay: () => timer(2000)}),
+      repeat({delay: 2000}),
+      filter((response) => response.status !== 204 && response.status !== 404),
+      take(1),
+    ).subscribe(() => {
       this.paymentStatus = 3;
       this.completed.emit();
     });

@@ -18,6 +18,7 @@ import {
   AngorTransactionStatus,
 } from './angor/AngorTransactionDecoder';
 import AngorBlocksRepository from './repositories/AngorBlocksRepository';
+import BlocksAuditsRepository from './repositories/BlocksAuditsRepository';
 
 export interface CoreIndex {
   name: string;
@@ -200,6 +201,7 @@ class Indexer {
       await auditReplicator.$sync();
       await statisticsReplicator.$sync();
       await AccelerationRepository.$indexPastAccelerations();
+      await BlocksAuditsRepository.$migrateAuditsV0toV1();
       // do not wait for classify blocks to finish
 
       // Index transactions related to Angor projects.

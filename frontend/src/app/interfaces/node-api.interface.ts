@@ -1,4 +1,4 @@
-import { Block, Transaction } from "./electrs.interface";
+import { AddressTxSummary, Block, ChainStats, Transaction } from "./electrs.interface";
 
 export interface OptimizedMempoolStats {
   added: number;
@@ -30,6 +30,8 @@ export interface CpfpInfo {
   adjustedVsize?: number;
   acceleration?: boolean;
   acceleratedBy?: number[];
+  acceleratedAt?: number;
+  feeDelta?: number;
 }
 
 export interface RbfInfo {
@@ -141,6 +143,8 @@ export interface SinglePoolStats {
   rank: number;
   share: number;
   lastEstimatedHashrate: number;
+  lastEstimatedHashrate3d: number;
+  lastEstimatedHashrate1w: number;
   emptyBlockRatio: string;
   logo: string;
   slug: string;
@@ -150,6 +154,8 @@ export interface SinglePoolStats {
 export interface PoolsStats {
   blockCount: number;
   lastEstimatedHashrate: number;
+  lastEstimatedHashrate3d: number;
+  lastEstimatedHashrate1w: number;
   pools: SinglePoolStats[];
 }
 
@@ -201,6 +207,7 @@ export interface BlockExtension {
     id: number;
     name: string;
     slug: string;
+    minerNames: string[] | null;
   }
 }
 
@@ -209,6 +216,8 @@ export interface BlockExtended extends Block {
 }
 
 export interface BlockAudit extends BlockExtended {
+  version: number,
+  unseenTxs?: string[],
   missingTxs: string[],
   addedTxs: string[],
   prioritizedTxs: string[],
@@ -235,7 +244,7 @@ export interface TransactionStripped {
   acc?: boolean;
   flags?: number | null;
   time?: number;
-  status?: 'found' | 'missing' | 'sigop' | 'fresh' | 'freshcpfp' | 'added' | 'prioritized' | 'censored' | 'selected' | 'rbf' | 'accelerated';
+  status?: 'found' | 'missing' | 'sigop' | 'fresh' | 'freshcpfp' | 'added' | 'added_prioritized' | 'prioritized' | 'added_deprioritized' | 'deprioritized' | 'censored' | 'selected' | 'rbf' | 'accelerated';
   context?: 'projected' | 'actual';
 }
 
@@ -249,6 +258,8 @@ export interface MempoolPosition {
   vsize: number,
   accelerated?: boolean,
   acceleratedBy?: number[],
+  acceleratedAt?: number,
+  feeDelta?: number,
 }
 
 export interface AccelerationPosition extends MempoolPosition {
@@ -407,10 +418,11 @@ export interface Acceleration {
   bidBoost?: number;
   boostCost?: number;
   boostRate?: number;
+  minedByPoolUniqueId?: number;
 }
 
 export interface AccelerationHistoryParams {
-  status?: string;
+  status?: string; // Single status or comma separated list of status
   timeframe?: string;
   poolUniqueId?: number;
   blockHash?: string;
@@ -444,4 +456,28 @@ export interface TestMempoolAcceptResult {
     "effective-includes": string[],
   },
   ['reject-reason']?: string,
+}
+
+export interface SubmitPackageResult {
+  package_msg: string;
+  "tx-results": { [wtxid: string]: TxResult };
+  "replaced-transactions"?: string[];
+}
+
+export interface TxResult {
+  txid: string;
+  "other-wtxid"?: string;
+  vsize?: number;
+  fees?: {
+    base: number;
+    "effective-feerate"?: number;
+    "effective-includes"?: string[];
+  };
+  error?: string;
+}
+export interface WalletAddress {
+  address: string;
+  active: boolean;
+  stats: ChainStats;
+  transactions: AddressTxSummary[];
 }

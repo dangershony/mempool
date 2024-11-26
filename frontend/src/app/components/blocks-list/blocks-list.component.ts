@@ -2,13 +2,14 @@ import { Component, OnInit, ChangeDetectionStrategy, Input, ChangeDetectorRef, I
 import { ActivatedRoute, Router } from '@angular/router';
 import { BehaviorSubject, combineLatest, Observable, timer, of, Subscription } from 'rxjs';
 import { debounceTime, delayWhen, filter, map, retryWhen, scan, skip, switchMap, tap, throttleTime } from 'rxjs/operators';
-import { BlockExtended } from '../../interfaces/node-api.interface';
-import { ApiService } from '../../services/api.service';
-import { StateService } from '../../services/state.service';
-import { WebsocketService } from '../../services/websocket.service';
-import { SeoService } from '../../services/seo.service';
-import { OpenGraphService } from '../../services/opengraph.service';
-import { seoDescriptionNetwork } from '../../shared/common.utils';
+import { BlockExtended } from '@interfaces/node-api.interface';
+import { ApiService } from '@app/services/api.service';
+import { StateService } from '@app/services/state.service';
+import { WebsocketService } from '@app/services/websocket.service';
+import { SeoService } from '@app/services/seo.service';
+import { OpenGraphService } from '@app/services/opengraph.service';
+import { seoDescriptionNetwork } from '@app/shared/common.utils';
+import { RelativeUrlPipe } from '@app/shared/pipes/relative-url/relative-url.pipe';
 
 @Component({
   selector: 'app-blocks-list',
@@ -49,6 +50,7 @@ export class BlocksList implements OnInit {
     private ogService: OpenGraphService,
     private route: ActivatedRoute,
     private router: Router,
+    private relativeUrlPipe: RelativeUrlPipe,
     @Inject(LOCALE_ID) private locale: string,
   ) {
     this.isMempoolModule = this.stateService.env.BASE_MODULE === 'mempool';
@@ -81,11 +83,13 @@ export class BlocksList implements OnInit {
         })
       ).subscribe();
 
+      const prevKey = this.dir === 'ltr' ? 'ArrowLeft' : 'ArrowRight';
+      const nextKey = this.dir === 'ltr' ? 'ArrowRight' : 'ArrowLeft';
+
       this.keyNavigationSubscription = this.stateService.keyNavigation$
       .pipe(
+        filter((event) => event.key === prevKey || event.key === nextKey),
         tap((event) => {
-          const prevKey = this.dir === 'ltr' ? 'ArrowLeft' : 'ArrowRight';
-          const nextKey = this.dir === 'ltr' ? 'ArrowRight' : 'ArrowLeft';
           if (event.key === prevKey && this.page > 1) {
             this.page--;
             this.isLoading = true;
@@ -180,7 +184,7 @@ export class BlocksList implements OnInit {
   }
 
   pageChange(page: number): void {
-    this.router.navigate(['blocks', page]);
+    this.router.navigate([this.relativeUrlPipe.transform('/blocks/'), page]);
   }
 
   trackByBlock(index: number, block: BlockExtended): number {

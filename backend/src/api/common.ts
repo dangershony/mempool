@@ -1,6 +1,6 @@
 import * as bitcoinjs from 'bitcoinjs-lib';
 import { Request } from 'express';
-import { CpfpInfo, CpfpSummary, CpfpCluster, EffectiveFeeStats, MempoolBlockWithTransactions, TransactionExtended, MempoolTransactionExtended, TransactionStripped, WorkingEffectiveFeeStats, TransactionClassified, TransactionFlags } from '../mempool.interfaces';
+import { EffectiveFeeStats, MempoolBlockWithTransactions, TransactionExtended, MempoolTransactionExtended, TransactionStripped, WorkingEffectiveFeeStats, TransactionClassified, TransactionFlags } from '../mempool.interfaces';
 import config from '../config';
 import { NodeSocket } from '../repositories/NodesSocketsRepository';
 import { isIP } from 'net';
@@ -10,7 +10,6 @@ import logger from '../logger';
 import { getVarIntLength, opcodes, parseMultisigScript } from '../utils/bitcoin-script';
 
 // Bitcoin Core default policy settings
-const TX_MAX_STANDARD_VERSION = 2;
 const MAX_STANDARD_TX_WEIGHT = 400_000;
 const MAX_BLOCK_SIGOPS_COST = 80_000;
 const MAX_STANDARD_TX_SIGOPS_COST = (MAX_BLOCK_SIGOPS_COST / 5);
@@ -80,8 +79,8 @@ export class Common {
     return arr;
   }
 
-  static findRbfTransactions(added: MempoolTransactionExtended[], deleted: MempoolTransactionExtended[], forceScalable = false): { [txid: string]: MempoolTransactionExtended[] } {
-    const matches: { [txid: string]: MempoolTransactionExtended[] } = {};
+  static findRbfTransactions(added: MempoolTransactionExtended[], deleted: MempoolTransactionExtended[], forceScalable = false): { [txid: string]: { replaced: MempoolTransactionExtended[], replacedBy: TransactionExtended }} {
+    const matches: { [txid: string]: { replaced: MempoolTransactionExtended[], replacedBy: TransactionExtended }} = {};
 
     // For small N, a naive nested loop is extremely fast, but it doesn't scale
     if (added.length < 1000 && deleted.length < 50 && !forceScalable) {
@@ -96,7 +95,7 @@ export class Common {
               addedTx.vin.some((vin) => vin.txid === deletedVin.txid && vin.vout === deletedVin.vout));
             });
         if (foundMatches?.length) {
-          matches[addedTx.txid] = [...new Set(foundMatches)];
+          matches[addedTx.txid] = { replaced: [...new Set(foundMatches)], replacedBy: addedTx };
         }
       });
     } else {
@@ -124,7 +123,7 @@ export class Common {
             foundMatches.add(deletedTx);
           }
           if (foundMatches.size) {
-            matches[addedTx.txid] = [...foundMatches];
+            matches[addedTx.txid] = { replaced: [...foundMatches], replacedBy: addedTx };
           }
         }
       }
@@ -139,17 +138,17 @@ export class Common {
       const replaced: Set<MempoolTransactionExtended> = new Set();
       for (let i = 0; i < tx.vin.length; i++) {
         const vin = tx.vin[i];
-        const match = spendMap.get(`${vin.txid}:${vin.vout}`);
+        const key = `${vin.txid}:${vin.vout}`;
+        const match = spendMap.get(key);
         if (match && match.txid !== tx.txid) {
           replaced.add(match);
           // remove this tx from the spendMap
           // prevents the same tx being replaced more than once
           for (const replacedVin of match.vin) {
-            const key = `${replacedVin.txid}:${replacedVin.vout}`;
-            spendMap.delete(key);
+            const replacedKey = `${replacedVin.txid}:${replacedVin.vout}`;
+            spendMap.delete(replacedKey);
           }
         }
-        const key = `${vin.txid}:${vin.vout}`;
         spendMap.delete(key);
       }
       if (replaced.size) {
@@ -200,10 +199,13 @@ export class Common {
    *
    * returns true early if any standardness rule is violated, otherwise false
    * (except for non-mandatory-script-verify-flag and p2sh script evaluation rules which are *not* enforced)
+   *
+   * As standardness rules change, we'll need to apply the rules in force *at the time* to older blocks.
+   * For now, just pull out individual rules into versioned functions where necessary.
    */
-  static isNonStandard(tx: TransactionExtended): boolean {
+  static isNonStandard(tx: TransactionExtended, height?: number): boolean {
     // version
-    if (tx.version > TX_MAX_STANDARD_VERSION) {
+    if (this.isNonStandardVersion(tx, height)) {
       return true;
     }
 
@@ -249,6 +251,8 @@ export class Common {
           return true;
         }
       } else if (['unknown', 'provably_unspendable', 'empty'].includes(vin.prevout?.scriptpubkey_type || '')) {
+        return true;
+      } else if (this.isNonStandardAnchor(tx, height)) {
         return true;
       }
       // TODO: bad-witness-nonstandard
@@ -335,6 +339,49 @@ export class Common {
     return false;
   }
 
+  // Individual versioned standardness rules
+
+  static V3_STANDARDNESS_ACTIVATION_HEIGHT = {
+    'testnet4': 42_000,
+    'testnet': 2_900_000,
+    'signet': 211_000,
+    '': 863_500,
+  };
+  static isNonStandardVersion(tx: TransactionExtended, height?: number): boolean {
+    let TX_MAX_STANDARD_VERSION = 3;
+    if (
+      height != null
+      && this.V3_STANDARDNESS_ACTIVATION_HEIGHT[config.MEMPOOL.NETWORK]
+      && height <= this.V3_STANDARDNESS_ACTIVATION_HEIGHT[config.MEMPOOL.NETWORK]
+    ) {
+      // V3 transactions were non-standard to spend before v28.x (scheduled for 2024/09/30 https://github.com/bitcoin/bitcoin/issues/29891)
+      TX_MAX_STANDARD_VERSION = 2;
+    }
+
+    if (tx.version > TX_MAX_STANDARD_VERSION) {
+      return true;
+    }
+    return false;
+  }
+
+  static ANCHOR_STANDARDNESS_ACTIVATION_HEIGHT = {
+    'testnet4': 42_000,
+    'testnet': 2_900_000,
+    'signet': 211_000,
+    '': 863_500,
+  };
+  static isNonStandardAnchor(tx: TransactionExtended, height?: number): boolean {
+    if (
+      height != null
+      && this.ANCHOR_STANDARDNESS_ACTIVATION_HEIGHT[config.MEMPOOL.NETWORK]
+      && height <= this.ANCHOR_STANDARDNESS_ACTIVATION_HEIGHT[config.MEMPOOL.NETWORK]
+    ) {
+      // anchor outputs were non-standard to spend before v28.x (scheduled for 2024/09/30 https://github.com/bitcoin/bitcoin/issues/29891)
+      return true;
+    }
+    return false;
+  }
+
   static getNonWitnessSize(tx: TransactionExtended): number {
     let weight = tx.weight;
     let hasWitness = false;
@@ -415,16 +462,19 @@ export class Common {
     return flags;
   }
 
-  static getTransactionFlags(tx: TransactionExtended): number {
+  static getTransactionFlags(tx: TransactionExtended, height?: number): number {
     let flags = tx.flags ? BigInt(tx.flags) : 0n;
 
     // Update variable flags (CPFP, RBF)
+    flags &= ~TransactionFlags.cpfp_child;
     if (tx.ancestors?.length) {
       flags |= TransactionFlags.cpfp_child;
     }
+    flags &= ~TransactionFlags.cpfp_parent;
     if (tx.descendants?.length) {
       flags |= TransactionFlags.cpfp_parent;
     }
+    flags &= ~TransactionFlags.replacement;
     if (tx.replacement) {
       flags |= TransactionFlags.replacement;
     }
@@ -545,7 +595,7 @@ export class Common {
     if (hasFakePubkey) {
       flags |= TransactionFlags.fake_pubkey;
     }
-    
+
     // fast but bad heuristic to detect possible coinjoins
     // (at least 5 inputs and 5 outputs, less than half of which are unique amounts, with no address reuse)
     const addressReuse = Object.keys(reusedOutputAddresses).reduce((acc, key) => Math.max(acc, (reusedInputAddresses[key] || 0) + (reusedOutputAddresses[key] || 0)), 0) > 1;
@@ -561,17 +611,17 @@ export class Common {
       flags |= TransactionFlags.batch_payout;
     }
 
-    if (this.isNonStandard(tx)) {
+    if (this.isNonStandard(tx, height)) {
       flags |= TransactionFlags.nonstandard;
     }
 
     return Number(flags);
   }
 
-  static classifyTransaction(tx: TransactionExtended): TransactionClassified {
+  static classifyTransaction(tx: TransactionExtended, height?: number): TransactionClassified {
     let flags = 0;
     try {
-      flags = Common.getTransactionFlags(tx);
+      flags = Common.getTransactionFlags(tx, height);
     } catch (e) {
       logger.warn('Failed to add classification flags to transaction: ' + (e instanceof Error ? e.message : e));
     }
@@ -582,8 +632,8 @@ export class Common {
     };
   }
 
-  static classifyTransactions(txs: TransactionExtended[]): TransactionClassified[] {
-    return txs.map(Common.classifyTransaction);
+  static classifyTransactions(txs: TransactionExtended[], height?: number): TransactionClassified[] {
+    return txs.map(tx => Common.classifyTransaction(tx, height));
   }
 
   static stripTransaction(tx: TransactionExtended): TransactionStripped {
@@ -804,96 +854,6 @@ export class Common {
         addr: formatted.url,
       };
     }
-  }
-
-  static calculateCpfp(height: number, transactions: TransactionExtended[], saveRelatives: boolean = false): CpfpSummary {
-    const clusters: CpfpCluster[] = []; // list of all cpfp clusters in this block
-    const clusterMap: { [txid: string]: CpfpCluster } = {}; // map transactions to their cpfp cluster
-    let clusterTxs: TransactionExtended[] = []; // working list of elements of the current cluster
-    let ancestors: { [txid: string]: boolean } = {}; // working set of ancestors of the current cluster root
-    const txMap: { [txid: string]: TransactionExtended } = {};
-    // initialize the txMap
-    for (const tx of transactions) {
-      txMap[tx.txid] = tx;
-    }
-    // reverse pass to identify CPFP clusters
-    for (let i = transactions.length - 1; i >= 0; i--) {
-      const tx = transactions[i];
-      if (!ancestors[tx.txid]) {
-        let totalFee = 0;
-        let totalVSize = 0;
-        clusterTxs.forEach(tx => {
-          totalFee += tx?.fee || 0;
-          totalVSize += (tx.weight / 4);
-        });
-        const effectiveFeePerVsize = totalFee / totalVSize;
-        let cluster: CpfpCluster;
-        if (clusterTxs.length > 1) {
-          cluster = {
-            root: clusterTxs[0].txid,
-            height,
-            txs: clusterTxs.map(tx => { return { txid: tx.txid, weight: tx.weight, fee: tx.fee || 0 }; }),
-            effectiveFeePerVsize,
-          };
-          clusters.push(cluster);
-        }
-        clusterTxs.forEach(tx => {
-          txMap[tx.txid].effectiveFeePerVsize = effectiveFeePerVsize;
-          if (cluster) {
-            clusterMap[tx.txid] = cluster;
-          }
-        });
-        // reset working vars
-        clusterTxs = [];
-        ancestors = {};
-      }
-      clusterTxs.push(tx);
-      tx.vin.forEach(vin => {
-        ancestors[vin.txid] = true;
-      });
-    }
-    // forward pass to enforce ancestor rate caps
-    for (const tx of transactions) {
-      let minAncestorRate = tx.effectiveFeePerVsize;
-      for (const vin of tx.vin) {
-        if (txMap[vin.txid]?.effectiveFeePerVsize) {
-          minAncestorRate = Math.min(minAncestorRate, txMap[vin.txid].effectiveFeePerVsize);
-        }
-      }
-      // check rounded values to skip cases with almost identical fees
-      const roundedMinAncestorRate = Math.ceil(minAncestorRate);
-      const roundedEffectiveFeeRate = Math.floor(tx.effectiveFeePerVsize);
-      if (roundedMinAncestorRate < roundedEffectiveFeeRate) {
-        tx.effectiveFeePerVsize = minAncestorRate;
-        if (!clusterMap[tx.txid]) {
-          // add a single-tx cluster to record the dependent rate
-          const cluster = {
-            root: tx.txid,
-            height,
-            txs: [{ txid: tx.txid, weight: tx.weight, fee: tx.fee || 0 }],
-            effectiveFeePerVsize: minAncestorRate,
-          };
-          clusterMap[tx.txid] = cluster;
-          clusters.push(cluster);
-        } else {
-          // update the existing cluster with the dependent rate
-          clusterMap[tx.txid].effectiveFeePerVsize = minAncestorRate;
-        }
-      }
-    }
-    if (saveRelatives) {
-      for (const cluster of clusters) {
-        cluster.txs.forEach((member, index) => {
-          txMap[member.txid].descendants = cluster.txs.slice(0, index).reverse();
-          txMap[member.txid].ancestors = cluster.txs.slice(index + 1).reverse();
-          txMap[member.txid].effectiveFeePerVsize = cluster.effectiveFeePerVsize;
-        });
-      }
-    }
-    return {
-      transactions,
-      clusters,
-    };
   }
 
   static calcEffectiveFeeStatistics(transactions: { weight: number, fee: number, effectiveFeePerVsize?: number, txid: string, acceleration?: boolean }[]): EffectiveFeeStats {

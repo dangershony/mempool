@@ -21,7 +21,7 @@ jobs:
         service:
           - frontend
           - backend
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-20.04
     timeout-minutes: 120
     name: Build and push to DockerHub
     steps:

@@ -1,0 +1,79 @@
+
+name: Docker build on tag
+env:
+  DOCKER_CLI_EXPERIMENTAL: enabled
+  TAG_FMT: "^refs/tags/(((.?[0-9]+){3,4}))$"
+  DOCKER_BUILDKIT: 0
+  COMPOSE_DOCKER_CLI_BUILD: 0
+
+on:
+  push:
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+
+      - v[0-9]+.[0-9]+.[0-9]+-*
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        service:
+          - frontend
+          - backend
+    runs-on: self-hosted
+    timeout-minutes: 120
+    name: Build and push to DockerHub
+    steps:
+      - name: Set env variables
+        run: echo "TAG=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_ENV
+
+      - name: Show set environment variables
+        run: |
+          printf "      TAG: %s\n"  "$TAG"
+
+      - name: Add SHORT_SHA env property with commit short sha
+        run: echo "SHORT_SHA=`echo ${GITHUB_SHA} | cut -c1-8`" >> $GITHUB_ENV
+
+      - name: Login to Docker
+        run: |
+          docker login -u "sondreb" -p "${{secrets.DOCKER_KEY}}"
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Init repo for Dockerization
+        run: docker/init.sh "$TAG"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        id: qemu
+
+      - name: Setup Docker buildx action
+        uses: docker/setup-buildx-action@v3
+        id: buildx
+
+      - name: Available platforms
+        run: echo ${{ steps.buildx.outputs.platforms }}
+
+      - name: Cache Docker layers
+        uses: actions/cache@v3
+        id: cache
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
+      - name: Run Docker buildx for ${{ matrix.service }} against tag
+        run: |
+          docker buildx build \
+          --cache-from "type=local,src=/tmp/.buildx-cache" \
+          --cache-to "type=local,dest=/tmp/.buildx-cache" \
+          --platform linux/amd64,linux/arm64 \
+          --tag blockcore/mempool-${{ matrix.service }}:$TAG \
+          --tag blockcore/mempool-${{ matrix.service }}:latest \
+          --build-context rustgbt=./rust \
+          --build-context backend=./backend \
+          --output "type=registry" ./${{ matrix.service }}/ \
+          --build-arg commitHash=$SHORT_SHA

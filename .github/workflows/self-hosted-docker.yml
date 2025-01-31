@@ -1,5 +1,5 @@
 
-name: Docker build on tag
+name: Docker build on tag (self host)
 env:
   DOCKER_CLI_EXPERIMENTAL: enabled
   TAG_FMT: "^refs/tags/(((.?[0-9]+){3,4}))$"

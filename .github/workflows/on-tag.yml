@@ -21,22 +21,12 @@ jobs:
         service:
           - frontend
           - backend
-    runs-on: ${{ github.repository_owner == 'github' && 'ubuntu-latest' || 'self-hosted' }}
+    runs-on: ubuntu-latest
     timeout-minutes: 120
     name: Build and push to DockerHub
     steps:
-      - name: Validate runner
-        run: |
-          echo "Runner name: ${{ runner.name }}"
-          echo "Runner OS: ${{ runner.os }}"
-          if [ -z "${{ runner.name }}" ]; then
-            echo "Error: Runner not properly initialized"
-            exit 1
-          fi
-
-      # Only run these steps on GitHub-hosted runners
+      # Workaround based on JonasAlfredsson/docker-on-tmpfs@v1.0.1
       - name: Replace the current swap file
-        if: ${{ github.repository_owner == 'github' }}
         shell: bash
         run: |
           sudo swapoff /mnt/swapfile
@@ -47,7 +37,6 @@ jobs:
           sudo swapon /mnt/swapfile
 
       - name: Show current memory and swap status
-        if: ${{ github.repository_owner == 'github' }}
         shell: bash
         run: |
           sudo free -h
@@ -55,7 +44,6 @@ jobs:
           sudo swapon --show
 
       - name: Mount a tmpfs over /var/lib/docker
-        if: ${{ github.repository_owner == 'github' }}
         shell: bash
         run: |
           if [ ! -d "/var/lib/docker" ]; then
@@ -66,7 +54,6 @@ jobs:
           sudo systemctl restart docker
           sudo df -h | grep docker
 
-      # Common steps for both environments
       - name: Set env variables
         run: echo "TAG=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_ENV
 
@@ -78,25 +65,8 @@ jobs:
         run: echo "SHORT_SHA=`echo ${GITHUB_SHA} | cut -c1-8`" >> $GITHUB_ENV
 
       - name: Login to Docker
-        timeout-minutes: 5
         run: |
-          max_attempts=3
-          attempt=1
-          while [ $attempt -le $max_attempts ]; do
-            if docker login -u "sondreb" -p "${{secrets.DOCKER_KEY}}"; then
-              echo "Docker login successful"
-              break
-            else
-              echo "Docker login attempt $attempt failed"
-              if [ $attempt -eq $max_attempts ]; then
-                echo "All Docker login attempts failed"
-                exit 1
-              fi
-              sleep 10
-              ((attempt++))
-            fi
-          done
-
+          docker login -u "sondreb" -p "${{secrets.DOCKER_KEY}}"
       - name: Checkout project
         uses: actions/checkout@v4
 
@@ -124,12 +94,7 @@ jobs:
             ${{ runner.os }}-buildx-
 
       - name: Run Docker buildx for ${{ matrix.service }} against tag
-        timeout-minutes: 60
-        continue-on-error: true
-        id: docker_build
         run: |
-          set -e
-          echo "Starting Docker build for ${{ matrix.service }}"
           docker buildx build \
           --cache-from "type=local,src=/tmp/.buildx-cache" \
           --cache-to "type=local,dest=/tmp/.buildx-cache" \
@@ -140,11 +105,3 @@ jobs:
           --build-context backend=./backend \
           --output "type=registry" ./${{ matrix.service }}/ \
           --build-arg commitHash=$SHORT_SHA
-
-      - name: Handle build failure
-        if: steps.docker_build.outcome == 'failure'
-        run: |
-          echo "Docker build failed for ${{ matrix.service }}"
-          echo "Cleaning Docker cache"
-          docker builder prune -f
-          exit 1

@@ -14,37 +14,45 @@ volumes:
 
 services:
   node:
-    container_name: btc-node
-    image: eugenenostrdev/bitcoin_signet:amd64
-    mem_limit: 2048m
-    cpus: 0.8
-    healthcheck:
-      test: ["CMD", "bitcoin-cli", "-rpcuser=rpcuser", "-rpcpassword=rpcpassword", "-rpcport=38332", "getblockchaininfo"]
-      interval: 10s
-      retries: 5
-      start_period: 5s
-      timeout: 10s
-    restart: unless-stopped
-    stop_grace_period: 15m
+    container_name: btc-chain
+    user: 1000:1000
+    image: lncm/bitcoind:v25.0
+    mem_limit: 8192m
+    cpus: 2.000
+    # healthcheck:
+    #   test: curl --fail http://localhost:8332/rest/chaininfo.json || exit 1
+    #   interval: 10s
+    #   retries: 10
+    #   start_period: 5s
+    #   timeout: 10s
+    command:
+      [
+        "-server=1",
+        "-rest=1",
+        "-txindex=1",
+        "-dbcache=6000",
+        "-rpcworkqueue=100",
+        "-rpcthreads=100",
+        "-addresstype=bech32",
+        "-changetype=bech32",
+        "-rpcallowip=10.202.0.0/8",
+        "-rpcallowip=10.201.0.0/8",
+        "-rpcallowip=192.168.0.0/8",
+        "-rpcallowip=172.0.0.0/8",
+        "-rpcbind=0.0.0.0",
+        "-rpcuser=rpcuser",
+        "-rpcpassword=rpcpassword",
+        "-assumevalid=000000000000000000039f849372dbe650f8b9a17e7aba7a8e022aaf41280b8d",
+      ]
+    restart: on-failure
+    stop_grace_period: 15m30s
     volumes:
       - blockchain:/root/.bitcoin
-    environment:
-      UACOMMENT: $UACOMMENT
-      BLOCKPRODUCTIONDELAY: ${BLOCKPRODUCTIONDELAY:-30}
-      MINERENABLED: ${MINERENABLED:-0} # change this to 1 if this node needs to mine (however for simplicity there should only be one mining node per challenge)
-      NBITS: $NBITS
-      MINETO: ${MINETO:-tb1qk4pq0rh75qtph47wlufhyss43flhvhvwe4zt8a}
-      PRIVKEY: ${PRIVKEY:-cNDhpWanXGyCed6U7eBNqRN3EyB7mEUbqm19tA7z5ho6BiNaPfmy} # private key path is m/84'/1'/0'/0/0 of test wallet mnemonic "margin radio diamond leg loud street announce guitar video shiver speed eyebrow"
-      SIGNETCHALLENGE: ${SIGNETCHALLENGE:-512102a3f8184701a033e5f8faa295647374b0bbc868082240d6e7ad8e9ecb0d86e6d451ae}
-      EXTERNAL_IP: $EXTERNAL_IP
-      ADDNODE: ${ADDNODE:-207.180.254.78}
-      RPCUSER: ${RPCUSER:-rpcuser}
-      RPCPASSWORD: ${RPCPASSWORD:-rpcpassword}
     ports:
-      - 18333:18333 # Make this a public node.
-      - 8333:8333 # Make this a public node.
-      - 38333:38333 # Make this a public node.
-      - 38332:38332
+      - "8333:8333"
+      - "8332:8332"
+      - "28332:28332"
+      - "28333:28333"
     networks:
       - mempoolnetwork
 

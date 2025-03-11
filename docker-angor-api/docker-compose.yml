@@ -67,7 +67,7 @@ services:
       ELECTRUM_PORT: "5001"
       ELECTRUM_TLS_ENABLED: "false"
       CORE_RPC_HOST: "node"
-      CORE_RPC_PORT: "38332"
+      CORE_RPC_PORT: "8332"
       CORE_RPC_USERNAME: "rpcuser"
       CORE_RPC_PASSWORD: "rpcpassword"
       DATABASE_ENABLED: "true"
@@ -151,7 +151,7 @@ services:
     entrypoint:
       /bin/electrs
     command: |
-      --network main
+      --network mainnet
       --jsonrpc-import
       --daemon-rpc-addr btc-node:8332
       --cookie "rpcuser:rpcpassword"

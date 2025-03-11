@@ -14,7 +14,7 @@ volumes:
 
 services:
   node:
-    container_name: btc-chain
+    container_name: btc-node
     user: 1000:1000
     image: lncm/bitcoind:v25.0
     mem_limit: 8192m
@@ -47,7 +47,7 @@ services:
     restart: on-failure
     stop_grace_period: 15m30s
     volumes:
-      - blockchain:/root/.bitcoin
+      - blockchain:/data/.bitcoin
     ports:
       - "8333:8333"
       - "8332:8332"

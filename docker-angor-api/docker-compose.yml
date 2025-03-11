@@ -153,7 +153,7 @@ services:
     command: |
       --network main
       --jsonrpc-import
-      --daemon-rpc-addr btc-node:28332
+      --daemon-rpc-addr btc-node:38332
       --cookie "rpcuser:rpcpassword"
       --db-dir /electrs
       --http-addr 0.0.0.0:3003
